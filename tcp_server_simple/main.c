@@ -3,8 +3,16 @@
 void on_close(hio_t* io) {
 }
 
+typedef struct mytest {
+    int age;
+    char name[10];
+} __attribute__((packed)) mytest_t;
+
 void on_recv(hio_t* io, void* buf, int readbytes) {
-	// 回显数据
+	// 打印数据
+    mytest_t* test = (mytest_t*)buf;
+    printf("recv: age=%d, name=%s\n", test->age, test->name);
+    // 回显数据
     hio_write(io, buf, readbytes);
 }
 
