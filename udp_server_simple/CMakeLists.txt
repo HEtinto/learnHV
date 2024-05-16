@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.10)
 
 # 设置项目名称
-set(PROJECT_NAME tcp_client_simple)
+set(PROJECT_NAME udp_server_simple)
 project(${PROJECT_NAME})
 
 # 如果hv库的头文件不在默认搜索路径中，可以添加如下：

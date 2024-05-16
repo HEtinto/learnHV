@@ -17,7 +17,10 @@ typedef struct mytest {
     int age;
     char name[10];
 } __attribute__((packed)) mytest_t;
+// 使用__attribute__((packed)) 预编译宏来取消内存对齐
 
+// 在on_timer1中向服务端发送自定义的结构体数据
+// 该函数在定时器到期时被调用
 void on_timer1(htimer_t* timer) {
     static int count = 0;
     mytest_t test1 = {0};
