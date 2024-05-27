@@ -5,19 +5,50 @@
 #include <string.h>
 #include <unistd.h>
 #include <time.h>
+#include <stdlib.h>
+#include "list.h"
 
 #define MAXLINE 4096
 #define LISTENQ 1024
 
-struct chat_socket {
-    int sockfd[1024];
-    int sock_max;
-};
+typedef struct msg {
+    int send_user_id;
+    int recv_user_id;
+    char data[];
+}msg_t;
 
-pthread_t create_worker(void *worker_func(void *), int sockfd){
+typedef struct msg_list {
+    struct list_head list;
+    msg_t *msg;
+}msg_list_t;
+
+typedef struct user {
+    struct list_head recv_head;
+    int sockfd;
+}user_t;
+
+typedef struct chat_mgt {
+    user_t *user[1024];
+    int user_num;
+}chat_mgt_t;
+
+struct list_head global_msg_list_head;
+chat_mgt_t chat_mgt = {0x0};
+
+user_t *make_user(int sockfd){
+    user_t *user = malloc(sizeof(user_t));
+    if (user == NULL){
+        perror("malloc error");
+        return NULL;
+    }
+    INIT_LIST_HEAD(&user->recv_head);
+    user->sockfd = sockfd;
+    return user;
+}
+
+pthread_t create_worker(void *worker_func(void *), user_t *user){
     pthread_t tid;
-    printf("socket %d\n", sockfd);
-    if (0 != pthread_create(&tid, NULL, worker_func, sockfd)) {
+    if (0 != pthread_create(&tid, NULL, worker_func, user)) {
         perror("pthread_create error");
         return -1;
     }
@@ -25,16 +56,48 @@ pthread_t create_worker(void *worker_func(void *), int sockfd){
     return tid;
 }
 
-void *worker_func(void *sock){
+void *worker_func_recv(void *arg){
+    user_t *user = (user_t *)arg;
+    printf("socket %d\n", user->sockfd);
+    char buff[MAXLINE] = {0x0};
+    int n = 0;
+    while (1) {
+        while ( (n = read(user->sockfd, buff, MAXLINE)) > 0){
+            buff[n] = 0;
+            msg_t *msg = malloc(sizeof(msg_t) + n);
+            if (msg == NULL){
+                perror("calloc error, can not save msg data.");
+                continue;
+            }
+            msg_list_t *msg_list = malloc(sizeof(msg_list_t));
+            if (msg_list == NULL) {
+                perror("malloc error");
+                free(msg);
+                continue;
+            }
+            INIT_LIST_HEAD(&msg_list->list);
+            memcpy(msg, buff, n);
+            msg_list->msg = msg;
+            list_add_tail(&msg_list->list, &user->recv_head);
+        }
+        if (n < 0) {
+            perror("read error");
+        }
+    }
+}
+
+void *worker_func_send(void *sock){
     int sockfd = (int)sock;
     printf("socket %d\n", sockfd);
     char buff[MAXLINE] = {0x0};
     int n = 0;
     while (1) {
         while ( (n = read(sockfd, buff, MAXLINE)) > 0){
-        buff[n] = 0;
-        if (fputs(buff, stdout) == EOF)
-            perror("EOF read.");
+            buff[n] = 0;
+            msg_t *msg = malloc(sizeof(msg_t) + n);
+            if (msg == NULL){
+                perror("calloc error, can not save msg data.");
+            }
         }
         if (n < 0) {
             perror("read error");
@@ -64,16 +127,12 @@ int main()
     for (;;) {
         len = sizeof(cliaddr);
         connfd = accept(listenfd, (struct sockaddr *) &cliaddr, &len);
-        for (;;) {
-            printf("connection from %s, port %d\n",
-                inet_ntop(AF_INET, &cliaddr.sin_addr, buff, sizeof(buff)),
-                ntohs(cliaddr.sin_port));
-            ticks = time(NULL);
-            snprintf(buff, sizeof(buff), "%.24s\r\n", ctime(&ticks));
-            write(connfd, buff, strlen(buff));
-            sleep(1);
+        user_t *user = make_user(connfd);
+        if (user == NULL) {
+            perror("make user error");
+            close(connfd);
         }
-        close(connfd);
+        create_worker(worker_func_recv, user);
     }
     return 0;
 }

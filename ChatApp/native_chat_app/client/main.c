@@ -7,6 +7,7 @@
 #include <time.h>
 #include <errno.h>
 #include <pthread.h>
+#include "list.h"
 
 #define MAXLINE 4096
 #define LISTENQ 1024
