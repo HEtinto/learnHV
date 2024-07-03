@@ -1,42 +1,26 @@
-#include <stdio.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h> // 添加这个头文件以包含Inet_ntop和ntohs
-#include <string.h>
-#include <unistd.h>
-#include <time.h>
-#include <stdlib.h>
-#include "list.h"
-
-#define MAXLINE 4096
-#define LISTENQ 1024
-
-typedef struct msg {
-    int send_user_id;
-    int recv_user_id;
-    char data[];
-}msg_t;
+#include "../include/msg.h"
 
 typedef struct msg_list {
     struct list_head list;
     msg_t *msg;
 }msg_list_t;
 
-typedef struct user {
-    struct list_head recv_head;
-    int sockfd;
-}user_t;
-
 typedef struct chat_mgt {
-    user_t *user[1024];
+    service_user_t *user[1024];
     int user_num;
 }chat_mgt_t;
 
 struct list_head global_msg_list_head;
-chat_mgt_t chat_mgt = {0x0};
+chat_mgt_t chat_mgt = {.user = 0x0, .user_num = 1024};
 
-user_t *make_user(int sockfd){
-    user_t *user = malloc(sizeof(user_t));
+void release_msg_list(msg_list_t *msg_list){
+    free(msg_list->msg);
+    list_del(&msg_list->list);
+    free(msg_list);
+}
+
+service_user_t *make_user(int sockfd){
+    service_user_t *user = malloc(sizeof(service_user_t));
     if (user == NULL){
         perror("malloc error");
         return NULL;
@@ -46,9 +30,9 @@ user_t *make_user(int sockfd){
     return user;
 }
 
-pthread_t create_worker(void *worker_func(void *), user_t *user){
+pthread_t create_worker(void *worker_func(void *), int sockfd){
     pthread_t tid;
-    if (0 != pthread_create(&tid, NULL, worker_func, user)) {
+    if (0 != pthread_create(&tid, NULL, worker_func, &sockfd)) {
         perror("pthread_create error");
         return -1;
     }
@@ -57,52 +41,42 @@ pthread_t create_worker(void *worker_func(void *), user_t *user){
 }
 
 void *worker_func_recv(void *arg){
-    user_t *user = (user_t *)arg;
-    printf("socket %d\n", user->sockfd);
-    char buff[MAXLINE] = {0x0};
-    int n = 0;
-    while (1) {
-        while ( (n = read(user->sockfd, buff, MAXLINE)) > 0){
-            buff[n] = 0;
-            msg_t *msg = malloc(sizeof(msg_t) + n);
-            if (msg == NULL){
-                perror("calloc error, can not save msg data.");
-                continue;
-            }
-            msg_list_t *msg_list = malloc(sizeof(msg_list_t));
-            if (msg_list == NULL) {
-                perror("malloc error");
-                free(msg);
-                continue;
-            }
-            INIT_LIST_HEAD(&msg_list->list);
-            memcpy(msg, buff, n);
-            msg_list->msg = msg;
-            list_add_tail(&msg_list->list, &user->recv_head);
-        }
-        if (n < 0) {
-            perror("read error");
-        }
-    }
-}
-
-void *worker_func_send(void *sock){
-    int sockfd = (int)sock;
+    int sockfd = *((int *)arg);
     printf("socket %d\n", sockfd);
     char buff[MAXLINE] = {0x0};
     int n = 0;
+    service_user_t *user = NULL;
     while (1) {
         while ( (n = read(sockfd, buff, MAXLINE)) > 0){
             buff[n] = 0;
-            msg_t *msg = malloc(sizeof(msg_t) + n);
-            if (msg == NULL){
-                perror("calloc error, can not save msg data.");
+            msg_t *msg = buff;
+            printf("data len: %d\n", msg->data_len);
+        }
+        if (n == 0) {
+            if (user != NULL) {
+                user->activate = false;
             }
+            perror("Connection closed by perr.\n");
+            break;
         }
         if (n < 0) {
-            perror("read error");
+            if (errno == EINTR) {
+                continue;
+            } else {
+                if (user != NULL) {
+                    user->activate = false;
+                }
+                perror("read error");
+                break;
+            }
         }
     }
+    // 关闭文件描述符
+    close(sockfd);
+}
+
+void *worker_func_send(void *arg){
+    
 }
 
 int main()
@@ -127,12 +101,7 @@ int main()
     for (;;) {
         len = sizeof(cliaddr);
         connfd = accept(listenfd, (struct sockaddr *) &cliaddr, &len);
-        user_t *user = make_user(connfd);
-        if (user == NULL) {
-            perror("make user error");
-            close(connfd);
-        }
-        create_worker(worker_func_recv, user);
+        create_worker(worker_func_recv, connfd);
     }
     return 0;
 }

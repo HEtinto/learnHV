@@ -7,6 +7,9 @@ project(${PROJECT_NAME})
 # 添加源文件
 set(SRC_LIST main.c)
 
+# 添加头文件
+include_directories(../../../../linux-list/include/)
+
 # 添加调试信息
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -g")
 
